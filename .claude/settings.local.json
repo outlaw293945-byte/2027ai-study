@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:youtu.be)",
+      "WebFetch(domain:www.youtube.com)",
+      "WebSearch",
+      "Read(//Users/takitani-kenichirou/.claude/**)",
+      "Bash(python3 -)"
+    ]
+  }
+}

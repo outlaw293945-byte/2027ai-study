@@ -1,0 +1,1283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>バトルロイヤル2D - ステップ2（敵AI）</title>
+<style>
+  /* ===== 画面全体の見た目 ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a2333;
+    font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+    color: #fff;
+    overflow: hidden;          /* ゲーム中にページがスクロールしないように */
+    -webkit-user-select: none; /* 長押しで文字が選択されるのを防ぐ */
+    user-select: none;
+  }
+
+  /* ゲーム画面本体 */
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;         /* マウスカーソルを照準っぽく */
+    touch-action: none;
+  }
+
+  /* ===== 画面の上に重ねる情報表示（HUD） ===== */
+  .hud {
+    position: fixed;
+    pointer-events: none;      /* HUDがクリックの邪魔をしないように */
+    text-shadow: 0 2px 6px rgba(0,0,0,.8);
+  }
+
+  /* 左上：体力バー */
+  #hud-left  { top: 16px; left: 16px; }
+
+  .bar-label {
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: .08em;
+    margin-bottom: 6px;
+  }
+  .bar {
+    width: 260px;
+    height: 22px;
+    background: rgba(0,0,0,.5);
+    border: 3px solid rgba(255,255,255,.85);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .bar > i {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #4ade80, #22d3ee);
+    transition: width .15s;
+  }
+
+  /* 右上：残弾数 */
+  #hud-right {
+    top: 16px; right: 16px;
+    text-align: right;
+  }
+  #ammo {
+    font-size: 44px;
+    font-weight: bold;
+    line-height: 1;
+  }
+  #ammo.reloading { color: #fbbf24; }
+  #ammo-label {
+    font-size: 17px;
+    opacity: .85;
+    margin-top: 4px;
+  }
+
+  /* 上中央：FPS表示 */
+  #fps {
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 18px;
+    font-weight: bold;
+    font-variant-numeric: tabular-nums;  /* 数字の幅を揃えてチラつきを防ぐ */
+    background: rgba(0,0,0,.45);
+    padding: 6px 16px;
+    border-radius: 999px;
+  }
+  #fps.good { color: #4ade80; }   /* 55以上：快適 */
+  #fps.warn { color: #fbbf24; }   /* 30〜54：やや重い */
+  #fps.bad  { color: #f87171; }   /* 30未満：重い */
+  #fps.hidden { display: none; }
+
+  /* 下中央：操作説明 */
+  #hud-help {
+    left: 50%; bottom: 16px;
+    transform: translateX(-50%);
+    font-size: 17px;
+    background: rgba(0,0,0,.45);
+    padding: 10px 18px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  #hud-help b { color: #fbbf24; }
+
+  /* 左上：残り敵数・撃破数 */
+  #status {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+    font-size: 18px;
+    font-weight: bold;
+  }
+  #enemies-left { color: #fca5a5; }
+  #kill-count   { color: #fde047; }
+
+  /* ===== スタート画面／結果画面（共通の作り） ===== */
+  #start, #result {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    background: rgba(12, 18, 30, .88);
+    text-align: center;
+    padding: 24px;
+    z-index: 10;
+  }
+  #start h1, #result h1 {
+    font-size: 46px;
+    line-height: 1.25;
+    letter-spacing: .04em;
+  }
+  #start h1 span { color: #fbbf24; }
+  #start p, #result p {
+    font-size: 19px;
+    line-height: 1.8;
+    max-width: 620px;
+  }
+  #start button, #result button {
+    font-family: inherit;
+    font-size: 24px;
+    font-weight: bold;
+    padding: 16px 48px;
+    border: none;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #fbbf24, #f97316);
+    color: #1a2333;
+    cursor: pointer;
+    box-shadow: 0 6px 0 #b45309;
+  }
+  #start button:active, #result button:active {
+    transform: translateY(4px);
+    box-shadow: 0 2px 0 #b45309;
+  }
+  #start.hidden, #result.hidden { display: none; }
+
+  /* 結果画面の見出しの色分け */
+  #result.win  #result-title { color: #4ade80; }
+  #result.lose #result-title { color: #f87171; }
+
+  .step-tag {
+    font-size: 16px;
+    opacity: .7;
+    letter-spacing: .1em;
+  }
+
+  /* ===== スマホ・小さい画面向け（文字を大きく） ===== */
+  @media (max-width: 600px) {
+    #start h1, #result h1 { font-size: 34px; }
+    #start p,  #result p  { font-size: 18px; }
+    #start button, #result button { font-size: 22px; padding: 16px 36px; }
+
+    .bar-label { font-size: 17px; }
+    .bar { width: 180px; height: 20px; }
+    #status { font-size: 17px; }
+    #ammo { font-size: 36px; }
+    #ammo-label { font-size: 16px; }
+
+    /* 操作説明は横に長いので、スマホでは折り返して表示 */
+    #hud-help {
+      font-size: 16px;
+      white-space: normal;
+      width: calc(100vw - 24px);
+      text-align: center;
+      border-radius: 16px;
+      line-height: 1.7;
+    }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- 左上：体力・戦況 -->
+<div id="hud-left" class="hud">
+  <div class="bar-label">HP</div>
+  <div class="bar"><i id="hp-fill" style="width:100%"></i></div>
+  <div id="status">
+    <span id="enemies-left">残り 6 人</span>
+    <span id="kill-count">撃破 0</span>
+  </div>
+</div>
+
+<!-- 右上：弾数 -->
+<div id="hud-right" class="hud">
+  <div id="ammo">30</div>
+  <div id="ammo-label">/ 30 発</div>
+</div>
+
+<!-- 上中央：FPS表示（Fキーで表示/非表示） -->
+<div id="fps" class="hud">-- FPS</div>
+
+<!-- 下中央：操作説明 -->
+<div id="hud-help" class="hud">
+  <b>WASD</b> 移動 ／ <b>マウス</b> 照準 ／ <b>左クリック</b> 発射 ／ <b>R</b> リロード ／ <b>Shift</b> ダッシュ ／ <b>F</b> FPS表示
+</div>
+
+<!-- スタート画面 -->
+<div id="start">
+  <div class="step-tag">STEP 2 / 5</div>
+  <h1>バトルロイヤル<span>2D</span></h1>
+  <p>
+    敵が6人います。全員倒せば勝利、HPが0になれば敗北です。<br>
+    敵は近づくと撃ってきますが、こちらの方が足が速いので、下がりながら戦えます。
+  </p>
+  <button id="start-btn">ゲームスタート</button>
+</div>
+
+<!-- 結果画面（勝ち／負け） -->
+<div id="result" class="hidden">
+  <h1 id="result-title">勝利！</h1>
+  <p id="result-detail"></p>
+  <button id="retry-btn">もう一度</button>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   バトルロイヤル2D — ステップ1
+   「プレイヤーが動く・マウスで狙う・弾を撃つ」だけを作った土台。
+
+   ▼ ゲームプログラムの基本の考え方
+   ゲームは「1秒間に約60回、次の2つを繰り返す」だけで出来ています。
+     1. update() … 状態を計算する（座標を動かす、当たり判定、など）
+     2. draw()   … 今の状態を画面に描く
+   この繰り返しを「ゲームループ」と呼びます。
+   ========================================================================= */
+
+
+/* -------------------------------------------------------------------------
+   設定値。数字はここにまとめておくと、後から調整しやすい。
+   ------------------------------------------------------------------------- */
+const CONFIG = {
+  map:     { w: 2400, h: 2400 },   // マップ（フィールド）の広さ（ピクセル）
+
+  player: {
+    radius:     18,
+    speed:      260,   // 通常の移動速度（1秒あたり何ピクセル進むか）
+    sprintMul:  1.7,   // ダッシュ時の速度倍率
+    maxHp:      100,
+  },
+
+  weapon: {
+    magazine:    30,    // マガジン1つあたりの弾数
+    fireRate:    0.09,  // 何秒に1発撃てるか（小さいほど連射が速い）
+    reloadTime:  1.6,   // リロードにかかる秒数
+    bulletSpeed: 1200,  // 弾の速さ
+    bulletLife:  1.1,   // 弾が消えるまでの秒数（＝射程の長さ）
+    spread:      0.035, // 弾のブレ（ラジアン）。0なら真っ直ぐ飛ぶ
+    recoil:      6,     // 撃った時に画面が揺れる強さ
+    damage:      12,    // 1発あたりのダメージ
+  },
+
+  enemy: {
+    count:       6,      // 出現する敵の数
+    radius:      18,
+    maxHp:       60,
+    speed:       150,    // 敵の移動速度（プレイヤーより少し遅い＝逃げ切れる）
+
+    sightRange:  500,    // この距離まで近づくとプレイヤーに気づく
+    loseRange:   820,    // ここまで離れると見失う
+    keepRange:   300,    // 敵が保ちたい距離（これより近いと下がる）
+    tooClose:    190,    // ここまで近いと後ずさりする
+
+    reaction:    0.6,    // 気づいてから撃ち始めるまでの間（秒）＝反応の遅さ
+    fireRate:    0.8,    // 何秒に1発撃つか
+    burst:       3,      // 1回に連射する弾数
+    burstGap:    0.11,   // 連射中の弾の間隔（秒）
+    spread:      0.14,   // 弾のブレ。プレイヤーより大きい＝当てにくい
+    bulletSpeed: 780,    // プレイヤーの弾より遅い＝避けられる
+    bulletLife:  1.3,
+    damage:      6,      // 敵1発のダメージ
+
+    strafeTime:  1.4,    // 横移動の向きを変える間隔（秒）
+    separation:  46,     // 敵同士がこれ以上重ならないように離れる距離
+  },
+
+  // カメラの追従。smooth は「1秒後にどれだけ差が残るか」。
+  // 小さいほどキビキビ追いかける（0.0005 = 1秒でほぼ追いつく）
+  camera: { smooth: 0.0005, lookAhead: 0.18 },
+};
+
+
+/* -------------------------------------------------------------------------
+   便利な小さい関数たち
+   ------------------------------------------------------------------------- */
+// 値を min〜max の範囲に収める
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+// a から b へ t（0〜1）の割合だけ近づけた値
+const lerp  = (a, b, t) => a + (b - a) * t;
+// min〜max のランダムな数
+const rand  = (min, max) => min + Math.random() * (max - min);
+
+/* a を b へ滑らかに近づける（フレームレートに左右されない版）。
+   単純に「毎回 ×0.88」とすると、描画の間隔がブレた時に動きもブレて
+   カクついて見える。経過時間 dt を指数に使うことで、
+   1秒あたりの近づき方が常に一定になり、滑らかに見える。
+   smooth = 1秒後に残る差の割合（小さいほど速く追いつく）        */
+const damp = (a, b, smooth, dt) => lerp(a, b, 1 - Math.pow(smooth, dt));
+
+
+/* -------------------------------------------------------------------------
+   画面（Canvas）の準備
+   ------------------------------------------------------------------------- */
+const canvas = document.getElementById("game");
+const ctx    = canvas.getContext("2d");
+
+// 画面サイズに合わせてCanvasの解像度を調整する。
+// devicePixelRatio を掛けるのは、Retinaなど高精細画面でぼやけないようにするため。
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(window.innerWidth  * dpr);
+  canvas.height = Math.floor(window.innerHeight * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// 画面の幅・高さ（CSSピクセル基準）
+const viewW = () => canvas.width  / (Math.min(window.devicePixelRatio || 1, 2));
+const viewH = () => canvas.height / (Math.min(window.devicePixelRatio || 1, 2));
+
+
+/* -------------------------------------------------------------------------
+   入力（キーボード・マウス）の状態を覚えておく
+   ------------------------------------------------------------------------- */
+const input = {
+  keys:  new Set(),        // 今押されているキーの一覧
+  mouse: { x: 0, y: 0 },   // マウスの画面上の位置
+  firing: false,           // 左クリックを押しっぱなしか（＝連射中か）
+};
+
+window.addEventListener("keydown", (e) => {
+  input.keys.add(e.code);
+  // スペースキーでページがスクロールするのを防ぐ
+  if (e.code === "Space") e.preventDefault();
+});
+window.addEventListener("keyup",   (e) => input.keys.delete(e.code));
+// 画面外にフォーカスが移った時、キーが押しっぱなし扱いにならないようリセット
+window.addEventListener("blur", () => { input.keys.clear(); input.firing = false; });
+
+canvas.addEventListener("mousemove", (e) => {
+  const r = canvas.getBoundingClientRect();
+  input.mouse.x = e.clientX - r.left;
+  input.mouse.y = e.clientY - r.top;
+});
+canvas.addEventListener("mousedown", (e) => { if (e.button === 0) input.firing = true;  });
+window.addEventListener("mouseup",   (e) => { if (e.button === 0) input.firing = false; });
+// 右クリックメニューはゲーム中じゃまなので出さない
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+
+/* -------------------------------------------------------------------------
+   ゲームの状態（今の世界の様子をまとめて持つ入れ物）
+   ------------------------------------------------------------------------- */
+const player = {
+  x: CONFIG.map.w / 2,
+  y: CONFIG.map.h / 2,
+  vx: 0, vy: 0,            // 今の移動量（速度）
+  angle: 0,                // 向いている方向（ラジアン）
+  hp: CONFIG.player.maxHp,
+  ammo: CONFIG.weapon.magazine,
+  fireCooldown: 0,         // 次の弾を撃てるまでの残り秒数
+  reloading: 0,            // リロード残り秒数（0ならリロード中ではない）
+  walkCycle: 0,            // 歩くモーション用のカウンター
+};
+
+const enemies   = [];   // 敵の一覧
+const bullets   = [];   // 飛んでいる弾（プレイヤーの弾も敵の弾もここに入る）
+const particles = [];   // 火花などの小さな粒
+const damageTexts = []; // 「12」などのダメージ表示
+const camera    = { x: player.x, y: player.y, shake: 0 };
+
+let running = false;      // ゲームが動いているか（スタート画面／結果画面の間はfalse）
+let kills   = 0;          // 倒した敵の数
+let hurtFlash = 0;        // 被弾時の赤い画面フラッシュの強さ
+let hitMarker = 0;        // 敵に当てた時に照準に出る印の残り時間
+
+/* --- 敵を1体つくる --- */
+function spawnEnemy(x, y) {
+  enemies.push({
+    x, y,
+    vx: 0, vy: 0,
+    angle: rand(0, Math.PI * 2),
+    hp: CONFIG.enemy.maxHp,
+    walkCycle: 0,
+
+    alerted: false,      // プレイヤーに気づいているか
+    reaction: 0,         // 気づいてから撃てるまでの残り時間
+    fireCooldown: rand(0, CONFIG.enemy.fireRate),
+    burstLeft: 0,        // 連射の残り弾数
+    burstTimer: 0,
+
+    strafeDir: Math.random() < 0.5 ? 1 : -1,  // 横移動の向き（1か-1）
+    strafeTimer: rand(0, CONFIG.enemy.strafeTime),
+    patrolX: x, patrolY: y,                   // うろうろする時の目的地
+    patrolTimer: 0,
+  });
+}
+
+/* --- 敵をマップ上にばらまく（プレイヤーから離れた場所に） --- */
+function spawnEnemies() {
+  enemies.length = 0;
+  const m = CONFIG.map;
+  let guard = 0;   // 万一ずっと条件を満たせない時に無限ループしないための保険
+
+  while (enemies.length < CONFIG.enemy.count && guard++ < 500) {
+    const x = rand(120, m.w - 120);
+    const y = rand(120, m.h - 120);
+    // プレイヤーのすぐ近くに湧くと理不尽なので、700px以上離す
+    if (Math.hypot(x - player.x, y - player.y) < 700) continue;
+    spawnEnemy(x, y);
+  }
+}
+
+
+/* -------------------------------------------------------------------------
+   ステップ1：更新処理（状態の計算）
+   dt = delta time（前回の描画からの経過秒数）。
+   これを掛け算することで、PCの速さに関係なく同じスピードで動く。
+   ------------------------------------------------------------------------- */
+function update(dt) {
+  updatePlayer(dt);
+  updateWeapon(dt);
+  updateEnemies(dt);
+  updateBullets(dt);
+  updateParticles(dt);
+  updateDamageTexts(dt);
+  updateCamera(dt);
+
+  // 被弾フラッシュとヒットマーカーを時間で薄れさせる
+  hurtFlash = Math.max(0, hurtFlash - dt * 2.2);
+  hitMarker = Math.max(0, hitMarker - dt);
+
+  checkGameEnd();
+}
+
+/* --- プレイヤーの移動と向き --- */
+function updatePlayer(dt) {
+  // 押されているキーから「進みたい方向」を作る
+  let dx = 0, dy = 0;
+  if (input.keys.has("KeyW") || input.keys.has("ArrowUp"))    dy -= 1;
+  if (input.keys.has("KeyS") || input.keys.has("ArrowDown"))  dy += 1;
+  if (input.keys.has("KeyA") || input.keys.has("ArrowLeft"))  dx -= 1;
+  if (input.keys.has("KeyD") || input.keys.has("ArrowRight")) dx += 1;
+
+  // 斜め移動が速くなってしまうのを防ぐ（長さを1に揃える＝正規化）
+  const len = Math.hypot(dx, dy);
+  if (len > 0) { dx /= len; dy /= len; }
+
+  const sprinting = input.keys.has("ShiftLeft") || input.keys.has("ShiftRight");
+  const speed = CONFIG.player.speed * (sprinting ? CONFIG.player.sprintMul : 1);
+
+  // いきなり最高速にせず、少しずつ目標速度に近づける（＝滑らかな加速）
+  player.vx = damp(player.vx, dx * speed, 0.001, dt);
+  player.vy = damp(player.vy, dy * speed, 0.001, dt);
+
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+
+  // マップの外に出ないように位置を制限する
+  const r = CONFIG.player.radius;
+  player.x = clamp(player.x, r, CONFIG.map.w - r);
+  player.y = clamp(player.y, r, CONFIG.map.h - r);
+
+  // 歩いている時だけ、足を動かすカウンターを進める
+  const movingSpeed = Math.hypot(player.vx, player.vy);
+  player.walkCycle += movingSpeed * dt * 0.045;
+
+  // マウスの方向を向く。
+  // マウスは「画面上の座標」なので、「マップ上の座標」に変換してから角度を出す。
+  const world = screenToWorld(input.mouse.x, input.mouse.y);
+  player.angle = Math.atan2(world.y - player.y, world.x - player.x);
+}
+
+/* --- 武器（発射とリロード） --- */
+function updateWeapon(dt) {
+  player.fireCooldown -= dt;
+
+  // リロード中の処理
+  if (player.reloading > 0) {
+    player.reloading -= dt;
+    if (player.reloading <= 0) {
+      player.ammo = CONFIG.weapon.magazine;   // リロード完了
+      player.reloading = 0;
+    }
+    return;   // リロード中は撃てない
+  }
+
+  // Rキー、または弾切れで自動リロード
+  const wantReload = input.keys.has("KeyR") && player.ammo < CONFIG.weapon.magazine;
+  if (wantReload || player.ammo <= 0) {
+    player.reloading = CONFIG.weapon.reloadTime;
+    return;
+  }
+
+  // 発射
+  if (input.firing && player.fireCooldown <= 0) {
+    fire();
+    player.fireCooldown = CONFIG.weapon.fireRate;
+  }
+}
+
+/* 弾を1発撃つ共通の処理。
+   プレイヤーも敵も「銃を撃つ」動作は同じなので、1つの関数にまとめている。
+   shooter … 撃つ人（x, y, angle を持つ）
+   spec    … 弾の性能（速さ・ブレ・威力など）
+   owner   … "player" か "enemy"。当たり判定で味方を撃たないために使う   */
+function fireFrom(shooter, spec, owner) {
+  // 銃口の位置（中心から、向いている方向に少し前）
+  const muzzle = CONFIG.player.radius + 14;
+  const mx = shooter.x + Math.cos(shooter.angle) * muzzle;
+  const my = shooter.y + Math.sin(shooter.angle) * muzzle;
+
+  // 少しだけランダムにブレさせる
+  const a = shooter.angle + rand(-spec.spread, spec.spread);
+  bullets.push({
+    x: mx, y: my,
+    vx: Math.cos(a) * spec.bulletSpeed,
+    vy: Math.sin(a) * spec.bulletSpeed,
+    life: spec.bulletLife,
+    damage: spec.damage,
+    owner,
+  });
+
+  // 銃口の火花
+  const hot = owner === "player";
+  for (let i = 0; i < 6; i++) {
+    const pa = a + rand(-0.5, 0.5);
+    const ps = rand(120, 380);
+    particles.push({
+      x: mx, y: my,
+      vx: Math.cos(pa) * ps, vy: Math.sin(pa) * ps,
+      life: rand(0.08, 0.22), maxLife: 0.22,
+      size: rand(2, 4.5),
+      color: hot ? (Math.random() < .5 ? "#fde68a" : "#fb923c") : "#fca5a5",
+    });
+  }
+
+  // 反動でわずかに後ろへ下がる
+  shooter.vx -= Math.cos(shooter.angle) * 40;
+  shooter.vy -= Math.sin(shooter.angle) * 40;
+}
+
+/* プレイヤーが撃つ */
+function fire() {
+  player.ammo--;
+  fireFrom(player, CONFIG.weapon, "player");
+  camera.shake = Math.min(camera.shake + CONFIG.weapon.recoil, 14);
+}
+
+/* -------------------------------------------------------------------------
+   敵AI
+
+   ▼ 考え方：「状態」で行動を切り替える
+   賢いAIを作ろうとすると難しくなるので、まず単純な仕組みから始める。
+   ここでは敵に「気づいていない／気づいた」の2つの状態だけを持たせ、
+   状態ごとに違う行動をさせている。この作り方を状態機械と呼ぶ。
+
+     気づいていない → その辺をうろうろ歩く
+     気づいた       → 近づく／離れる／横に動く ＋ 撃つ
+   ------------------------------------------------------------------------- */
+function updateEnemies(dt) {
+  const E = CONFIG.enemy;
+
+  for (const e of enemies) {
+    const dx = player.x - e.x;
+    const dy = player.y - e.y;
+    const dist = Math.hypot(dx, dy);
+
+    // --- 気づく／見失う ---
+    // 気づく距離より、見失う距離を大きくしてある。
+    // 同じ距離にすると、境目で「気づいた／見失った」を高速で繰り返して挙動が震えるため。
+    if (!e.alerted && dist < E.sightRange) {
+      e.alerted  = true;
+      e.reaction = E.reaction;    // すぐには撃たず、少し「反応の間」を置く
+    } else if (e.alerted && dist > E.loseRange) {
+      e.alerted = false;
+    }
+
+    // 進みたい方向（この後の処理で決める）
+    let moveX = 0, moveY = 0;
+
+    if (e.alerted) {
+      // 常にプレイヤーの方を向く
+      e.angle = Math.atan2(dy, dx);
+
+      // プレイヤーへ向かう単位ベクトル（長さ1の矢印）
+      const ux = dx / (dist || 1);
+      const uy = dy / (dist || 1);
+
+      // 距離に応じて、近づく／下がる／その場を保つ
+      if (dist > E.keepRange)      { moveX += ux;       moveY += uy;       }
+      else if (dist < E.tooClose)  { moveX -= ux * 1.1; moveY -= uy * 1.1; }
+
+      // 横移動（ストレイフ）。まっすぐ来るだけだと的になるので左右に揺さぶる。
+      // 進行方向を90度回した向き（-uy, ux）が「横」になる。
+      e.strafeTimer -= dt;
+      if (e.strafeTimer <= 0) {
+        e.strafeDir  = -e.strafeDir;             // 向きを反転
+        e.strafeTimer = E.strafeTime * rand(0.7, 1.4);
+      }
+      moveX += -uy * e.strafeDir * 0.85;
+      moveY +=  ux * e.strafeDir * 0.85;
+
+      updateEnemyShooting(e, dist, dt);
+
+    } else {
+      // --- うろうろ（パトロール）---
+      e.patrolTimer -= dt;
+      const reached = Math.hypot(e.patrolX - e.x, e.patrolY - e.y) < 40;
+      if (e.patrolTimer <= 0 || reached) {
+        // 今いる場所の周りに、次の目的地をランダムに決める
+        e.patrolX = clamp(e.x + rand(-400, 400), 60, CONFIG.map.w - 60);
+        e.patrolY = clamp(e.y + rand(-400, 400), 60, CONFIG.map.h - 60);
+        e.patrolTimer = rand(2.5, 5);
+      }
+      const px = e.patrolX - e.x, py = e.patrolY - e.y;
+      const plen = Math.hypot(px, py) || 1;
+      moveX = px / plen * 0.55;      // パトロール中はゆっくり歩く
+      moveY = py / plen * 0.55;
+      e.angle = Math.atan2(moveY, moveX);
+    }
+
+    // --- 敵同士が重ならないように離れる ---
+    // 全員がプレイヤーへ最短距離で向かうと、団子になって1体に見えてしまう。
+    // 近すぎる相手から少しだけ離れる力を足すと、自然にばらける。
+    for (const other of enemies) {
+      if (other === e) continue;
+      const ox = e.x - other.x, oy = e.y - other.y;
+      const od = Math.hypot(ox, oy);
+      if (od > 0 && od < E.separation) {
+        moveX += (ox / od) * (1 - od / E.separation) * 1.5;
+        moveY += (oy / od) * (1 - od / E.separation) * 1.5;
+      }
+    }
+
+    // --- 実際に動かす ---
+    const mlen = Math.hypot(moveX, moveY);
+    if (mlen > 1) { moveX /= mlen; moveY /= mlen; }   // 速くなりすぎないよう制限
+
+    e.vx = damp(e.vx, moveX * E.speed, 0.002, dt);
+    e.vy = damp(e.vy, moveY * E.speed, 0.002, dt);
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+
+    e.x = clamp(e.x, E.radius, CONFIG.map.w - E.radius);
+    e.y = clamp(e.y, E.radius, CONFIG.map.h - E.radius);
+
+    e.walkCycle += Math.hypot(e.vx, e.vy) * dt * 0.045;
+  }
+}
+
+/* --- 敵の射撃（3発ずつの連射） --- */
+function updateEnemyShooting(e, dist, dt) {
+  const E = CONFIG.enemy;
+
+  // 気づいた直後の「反応の間」。これが無いと理不尽に感じる
+  if (e.reaction > 0) { e.reaction -= dt; return; }
+
+  // 連射中：一定間隔で1発ずつ出す
+  if (e.burstLeft > 0) {
+    e.burstTimer -= dt;
+    if (e.burstTimer <= 0) {
+      fireFrom(e, E, "enemy");
+      e.burstLeft--;
+      e.burstTimer = E.burstGap;
+    }
+    return;
+  }
+
+  // 連射の合間
+  e.fireCooldown -= dt;
+  if (e.fireCooldown <= 0 && dist < E.sightRange) {
+    e.burstLeft   = E.burst;
+    e.burstTimer  = 0;
+    e.fireCooldown = E.fireRate * rand(0.8, 1.5);   // 間隔をばらつかせて機械的に見せない
+  }
+}
+
+/* --- 弾の移動 --- */
+function updateBullets(dt) {
+  // 後ろから回すのは、途中で削除しても番号がずれないため
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.life -= dt;
+
+    // --- 当たり判定 ---
+    // 「弾の位置」と「相手の中心」の距離が半径より小さければ命中、という一番簡単な方法。
+    // 自分が撃った弾は自分に当たらないよう、owner で撃った側を見分けている。
+    let hit = false;
+
+    if (b.owner === "player") {
+      for (const e of enemies) {
+        if (Math.hypot(b.x - e.x, b.y - e.y) > CONFIG.enemy.radius) continue;
+        damageEnemy(e, b.damage, b.x, b.y);
+        hit = true;
+        break;      // 1発の弾は1体にしか当たらない
+      }
+    } else {
+      if (Math.hypot(b.x - player.x, b.y - player.y) <= CONFIG.player.radius) {
+        damagePlayer(b.damage, b.x, b.y);
+        hit = true;
+      }
+    }
+
+    // 寿命切れ、またはマップの外に出たら消す
+    const out = b.x < 0 || b.y < 0 || b.x > CONFIG.map.w || b.y > CONFIG.map.h;
+    if (hit || b.life <= 0 || out) {
+      if (out) spawnImpact(clamp(b.x, 0, CONFIG.map.w), clamp(b.y, 0, CONFIG.map.h));
+      bullets.splice(i, 1);
+    }
+  }
+}
+
+/* --- 敵にダメージを与える --- */
+function damageEnemy(e, amount, hx, hy) {
+  e.hp -= amount;
+  e.alerted = true;                       // 撃たれたら気づく（後ろから撃っても反撃してくる）
+  e.reaction = Math.min(e.reaction, 0.2); // 反応を早める
+
+  spawnImpact(hx, hy, "#fca5a5");
+  damageTexts.push({ x: hx, y: hy, text: amount, life: 0.7, maxLife: 0.7 });
+  hitMarker = 0.18;                       // 照準に「当たった」印を出す
+
+  if (e.hp <= 0) killEnemy(e);
+}
+
+/* --- 敵を倒す --- */
+function killEnemy(e) {
+  const index = enemies.indexOf(e);
+  if (index >= 0) enemies.splice(index, 1);
+  kills++;
+
+  // 爆散の演出
+  for (let i = 0; i < 26; i++) {
+    const a = rand(0, Math.PI * 2);
+    const s = rand(80, 420);
+    particles.push({
+      x: e.x, y: e.y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: rand(0.3, 0.8), maxLife: 0.8,
+      size: rand(3, 7),
+      color: Math.random() < .5 ? "#f87171" : "#fbbf24",
+    });
+  }
+  camera.shake = Math.min(camera.shake + 8, 16);
+}
+
+/* --- プレイヤーがダメージを受ける --- */
+function damagePlayer(amount, hx, hy) {
+  player.hp = Math.max(0, player.hp - amount);
+  hurtFlash = 1;                          // 画面を赤くフラッシュさせる
+  camera.shake = Math.min(camera.shake + 7, 16);
+  spawnImpact(hx, hy, "#fecaca");
+}
+
+/* --- ダメージ数値の表示（上に浮かんで消える） --- */
+function updateDamageTexts(dt) {
+  for (let i = damageTexts.length - 1; i >= 0; i--) {
+    const t = damageTexts[i];
+    t.y -= 34 * dt;
+    t.life -= dt;
+    if (t.life <= 0) damageTexts.splice(i, 1);
+  }
+}
+
+// 着弾の火花
+function spawnImpact(x, y, color = "#e2e8f0") {
+  for (let i = 0; i < 8; i++) {
+    const a = rand(0, Math.PI * 2);
+    const s = rand(60, 260);
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: rand(0.15, 0.4), maxLife: 0.4,
+      size: rand(2, 4),
+      color,
+    });
+  }
+}
+
+/* --- 粒（エフェクト）の更新 --- */
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    // だんだん減速させる（dtを使い、フレームレートに左右されないように）
+    const drag = Math.pow(0.007, dt);
+    p.vx *= drag;
+    p.vy *= drag;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+/* --- カメラ（画面がプレイヤーを追いかける） --- */
+function updateCamera(dt) {
+  // マウスの方向へ少しだけカメラをずらすと、狙う先が見やすくなる
+  const world  = screenToWorld(input.mouse.x, input.mouse.y);
+  const targetX = lerp(player.x, world.x, CONFIG.camera.lookAhead);
+  const targetY = lerp(player.y, world.y, CONFIG.camera.lookAhead);
+
+  camera.x = damp(camera.x, targetX, CONFIG.camera.smooth, dt);
+  camera.y = damp(camera.y, targetY, CONFIG.camera.smooth, dt);
+
+  camera.shake *= Math.pow(0.0001, dt);      // 揺れを徐々に収める
+  if (camera.shake < 0.1) camera.shake = 0;
+}
+
+// 画面上の座標 → マップ上の座標 に変換する
+function screenToWorld(sx, sy) {
+  return { x: sx - viewW() / 2 + camera.x,
+           y: sy - viewH() / 2 + camera.y };
+}
+
+
+/* -------------------------------------------------------------------------
+   ステップ2：描画処理（今の状態を画面に描く）
+   ------------------------------------------------------------------------- */
+function draw() {
+  const w = viewW(), h = viewH();
+
+  // 画面をいったん背景色で塗りつぶす（前のフレームの絵を消す）
+  ctx.fillStyle = "#6ba84f";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+
+  // カメラの分だけ画面全体をずらす。
+  // これ以降に描くものは「マップ上の座標」で指定できる。
+  // ※ここで Math.round() を使うと、1ピクセル単位で world が飛んで
+  //   カクついて見えるので、小数のまま渡すのが正解。
+  const shakeX = camera.shake ? rand(-camera.shake, camera.shake) : 0;
+  const shakeY = camera.shake ? rand(-camera.shake, camera.shake) : 0;
+  ctx.translate(w / 2 - camera.x + shakeX,
+                h / 2 - camera.y + shakeY);
+
+  // 描く順番＝重なる順番。後に描いたものが上に来る。
+  drawGround();
+  drawParticles();
+  drawEnemies();
+  drawPlayer();
+  drawBullets();
+  drawDamageTexts();
+
+  ctx.restore();
+
+  drawHurtFlash();
+  drawOffscreenMarkers();
+  drawCrosshair();
+}
+
+/* --- 被弾時に画面のふちを赤く光らせる --- */
+function drawHurtFlash() {
+  if (hurtFlash <= 0) return;
+  const w = viewW(), h = viewH();
+
+  // 中心は透明、ふちだけ赤くする（画面が見えなくならないように）
+  const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25,
+                                     w / 2, h / 2, Math.max(w, h) * 0.62);
+  g.addColorStop(0, "rgba(220,38,38,0)");
+  g.addColorStop(1, "rgba(220,38,38," + (hurtFlash * 0.55) + ")");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+}
+
+/* --- 画面の外にいる敵の方向を、画面のふちに矢印で示す --- */
+function drawOffscreenMarkers() {
+  const w = viewW(), h = viewH();
+  const margin = 42;
+
+  for (const e of enemies) {
+    // その敵が画面内に見えているかを調べる
+    const sx = e.x - camera.x + w / 2;
+    const sy = e.y - camera.y + h / 2;
+    if (sx > 0 && sx < w && sy > 0 && sy < h) continue;   // 見えているので印は不要
+
+    // 画面中央から敵への角度を求め、画面のふちに印を置く
+    const a = Math.atan2(sy - h / 2, sx - w / 2);
+    const mx = clamp(w / 2 + Math.cos(a) * (w / 2 - margin), margin, w - margin);
+    const my = clamp(h / 2 + Math.sin(a) * (h / 2 - margin), margin, h - margin);
+
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.rotate(a);
+    ctx.fillStyle = e.alerted ? "rgba(248,113,113,.95)" : "rgba(248,113,113,.5)";
+    ctx.beginPath();
+    ctx.moveTo(12, 0); ctx.lineTo(-8, -8); ctx.lineTo(-8, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* --- 地面（草原とグリッド線） --- */
+function drawGround() {
+  const m = CONFIG.map;
+
+  // マップの内側
+  ctx.fillStyle = "#7ab85a";
+  ctx.fillRect(0, 0, m.w, m.h);
+
+  // 目印のグリッド線。これがあると自分が動いているのが分かりやすい。
+  // マップ全部を描くと無駄なので、今カメラに映っている範囲だけ描く。
+  const step = 120;
+  const left   = Math.max(0,   camera.x - viewW() / 2 - step);
+  const right  = Math.min(m.w, camera.x + viewW() / 2 + step);
+  const top    = Math.max(0,   camera.y - viewH() / 2 - step);
+  const bottom = Math.min(m.h, camera.y + viewH() / 2 + step);
+
+  ctx.strokeStyle = "rgba(255,255,255,.10)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let x = Math.ceil(left / step) * step; x <= right; x += step) {
+    ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+  }
+  for (let y = Math.ceil(top / step) * step; y <= bottom; y += step) {
+    ctx.moveTo(left, y); ctx.lineTo(right, y);
+  }
+  ctx.stroke();
+
+  // マップの外周（ここから先は行けない、という壁の表現）
+  ctx.strokeStyle = "rgba(255,255,255,.55)";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(0, 0, m.w, m.h);
+}
+
+/* --- 弾（光る線として描くと速さが伝わる） --- */
+function drawBullets() {
+  ctx.lineCap = "round";
+  for (const b of bullets) {
+    // 進行方向の少し後ろまで線を引くと、残像のように見える
+    const tailX = b.x - b.vx * 0.012;
+    const tailY = b.y - b.vy * 0.012;
+
+    ctx.strokeStyle = "rgba(253, 224, 71, .45)";
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(b.x, b.y); ctx.stroke();
+
+    ctx.strokeStyle = "#fffbeb";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+}
+
+/* --- 火花などの粒 --- */
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* 上から見た人を描く共通処理。
+   プレイヤーも敵も見た目の作りは同じなので、色だけ差し替えて使い回す。
+   （同じ描画コードを2か所に書くと、片方だけ直し忘れて食い違うため）   */
+const SKIN = {
+  player: { bodyA: "#60a5fa", bodyB: "#3b82f6", head: "#fcd7b6", legs: "#334155" },
+  enemy:  { bodyA: "#fb7185", bodyB: "#e11d48", head: "#f3c9a7", legs: "#4c1d24" },
+};
+
+function drawCharacter(ent, r, skin) {
+  ctx.save();
+  ctx.translate(ent.x, ent.y);
+
+  // 足元の影。少し下にずらして描くと立体的に見える
+  ctx.fillStyle = "rgba(0,0,0,.28)";
+  ctx.beginPath();
+  ctx.ellipse(2, 6, r * 1.05, r * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.rotate(ent.angle);   // ここから先は「向いている方向」を基準に描ける
+
+  // 足（歩くと前後に動く）
+  const moving = Math.hypot(ent.vx, ent.vy) > 20;
+  const swing  = moving ? Math.sin(ent.walkCycle) * 7 : 0;
+  ctx.fillStyle = skin.legs;
+  roundRect(swing - 4, -r + 2, 12, 9, 4);          // 左足
+  roundRect(-swing - 4, r - 11, 12, 9, 4);         // 右足
+
+  // 腕と銃
+  ctx.fillStyle = skin.head;
+  roundRect(r - 4, -13, 16, 8, 4);
+  roundRect(r - 4,   5, 16, 8, 4);
+
+  ctx.fillStyle = "#2b3646";
+  roundRect(r + 4, -4, 30, 9, 3);                  // 銃身
+  ctx.fillStyle = "#475569";
+  roundRect(r + 2,  3, 10, 12, 3);                 // グリップ
+
+  // 体（フォートナイトっぽく明るい色に）
+  const body = ctx.createLinearGradient(-r, -r, r, r);
+  body.addColorStop(0, skin.bodyA);
+  body.addColorStop(1, skin.bodyB);
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,.9)";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // 頭（上から見ると頭のてっぺんが見える）
+  ctx.fillStyle = skin.head;
+  ctx.beginPath();
+  ctx.arc(1, 0, r * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 向いている方向を示す小さな印
+  ctx.fillStyle = "#1e293b";
+  roundRect(r * 0.15, -3.5, 9, 7, 3);
+
+  ctx.restore();
+}
+
+function drawPlayer() {
+  drawCharacter(player, CONFIG.player.radius, SKIN.player);
+}
+
+/* --- 敵たち（HPバーと「!」マーク付き） --- */
+function drawEnemies() {
+  const E = CONFIG.enemy;
+
+  for (const e of enemies) {
+    drawCharacter(e, E.radius, SKIN.enemy);
+
+    // 頭上のHPバー。満タンの時は出さない（画面がうるさくなるため）
+    if (e.hp < E.maxHp) {
+      const w = 44, h = 7, y = e.y - E.radius - 16;
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      roundRect(e.x - w / 2, y, w, h, 3);
+      ctx.fillStyle = "#f87171";
+      roundRect(e.x - w / 2, y, w * (e.hp / E.maxHp), h, 3);
+    }
+
+    // こちらに気づいている敵には「!」を出す（誰が撃ってくるか一目で分かるように）
+    if (e.alerted) {
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = "bold 20px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("!", e.x, e.y - E.radius - 24);
+    }
+  }
+}
+
+/* --- ダメージ数値 --- */
+function drawDamageTexts() {
+  ctx.textAlign = "center";
+  ctx.font = "bold 22px sans-serif";
+  for (const t of damageTexts) {
+    ctx.globalAlpha = clamp(t.life / t.maxLife, 0, 1);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(0,0,0,.7)";
+    ctx.strokeText(t.text, t.x, t.y);
+    ctx.fillStyle = "#fde047";
+    ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// 角の丸い四角を描く小さな道具（同じ処理を何度も書かなくて済むように）
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/* --- 照準（マウスの位置に描く） --- */
+function drawCrosshair() {
+  const { x, y } = input.mouse;
+  const gap = 6, len = 12;
+
+  ctx.strokeStyle = "rgba(255,255,255,.9)";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x - gap - len, y); ctx.lineTo(x - gap, y);
+  ctx.moveTo(x + gap, y);       ctx.lineTo(x + gap + len, y);
+  ctx.moveTo(x, y - gap - len); ctx.lineTo(x, y - gap);
+  ctx.moveTo(x, y + gap);       ctx.lineTo(x, y + gap + len);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,.9)";
+  ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+
+  // 敵に当たった瞬間だけ出る「×」印（当たった手応えを分かりやすくするため）
+  if (hitMarker > 0) {
+    const s = 9;
+    ctx.strokeStyle = "rgba(248,113,113," + clamp(hitMarker / 0.18, 0, 1) + ")";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - s, y - s); ctx.lineTo(x - s / 2.2, y - s / 2.2);
+    ctx.moveTo(x + s, y - s); ctx.lineTo(x + s / 2.2, y - s / 2.2);
+    ctx.moveTo(x - s, y + s); ctx.lineTo(x - s / 2.2, y + s / 2.2);
+    ctx.moveTo(x + s, y + s); ctx.lineTo(x + s / 2.2, y + s / 2.2);
+    ctx.stroke();
+  }
+}
+
+
+/* -------------------------------------------------------------------------
+   HUD（体力・弾数）の表示更新。
+   ここはCanvasではなく、普通のHTML要素を書き換えている。
+   （文字は HTML の方が読みやすく、大きさの調整も簡単なため）
+   ------------------------------------------------------------------------- */
+const el = {
+  hpFill:      document.getElementById("hp-fill"),
+  ammo:        document.getElementById("ammo"),
+  ammoLabel:   document.getElementById("ammo-label"),
+  fps:         document.getElementById("fps"),
+  enemiesLeft: document.getElementById("enemies-left"),
+  killCount:   document.getElementById("kill-count"),
+};
+
+function updateHud() {
+  el.hpFill.style.width = (player.hp / CONFIG.player.maxHp * 100) + "%";
+  el.enemiesLeft.textContent = "残り " + enemies.length + " 人";
+  el.killCount.textContent   = "撃破 " + kills;
+
+  if (player.reloading > 0) {
+    el.ammo.textContent = "…";
+    el.ammo.classList.add("reloading");
+    el.ammoLabel.textContent = "リロード中";
+  } else {
+    el.ammo.textContent = player.ammo;
+    el.ammo.classList.remove("reloading");
+    el.ammoLabel.textContent = "/ " + CONFIG.weapon.magazine + " 発";
+  }
+}
+
+
+/* -------------------------------------------------------------------------
+   FPS（1秒あたりの描画回数）の計測。
+   カクつきの原因が「本当のコマ落ち」なのかを確認するための表示。
+   Fキーで表示/非表示を切り替えられる。
+   ------------------------------------------------------------------------- */
+const fpsMeter = { frames: 0, elapsed: 0, value: 0 };
+
+function updateFps(dt) {
+  fpsMeter.frames++;
+  fpsMeter.elapsed += dt;
+
+  // 0.5秒ごとに平均を出す（毎フレーム更新すると数字が暴れて読めないため）
+  if (fpsMeter.elapsed < 0.5) return;
+
+  fpsMeter.value  = Math.round(fpsMeter.frames / fpsMeter.elapsed);
+  fpsMeter.frames = 0;
+  fpsMeter.elapsed = 0;
+
+  el.fps.textContent = fpsMeter.value + " FPS";
+  el.fps.className = "hud " +
+    (fpsMeter.value >= 55 ? "good" : fpsMeter.value >= 30 ? "warn" : "bad") +
+    (fpsVisible ? "" : " hidden");
+}
+
+let fpsVisible = true;
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "KeyF") return;
+  fpsVisible = !fpsVisible;
+  el.fps.classList.toggle("hidden", !fpsVisible);
+});
+
+
+/* -------------------------------------------------------------------------
+   ゲームループ本体
+   requestAnimationFrame は「次に画面を描くタイミングで呼んで」とブラウザに頼む命令。
+   画面のリフレッシュレートに合わせて、1秒間に60回（120Hzの画面なら120回）呼ばれる。
+   ------------------------------------------------------------------------- */
+let lastTime = performance.now();
+
+function loop(now) {
+  requestAnimationFrame(loop);
+
+  // 前回からの経過秒数。タブを離れた直後などに巨大な値にならないよう上限をつける
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  if (running) update(dt);
+  draw();
+  updateHud();
+  updateFps(dt);
+}
+requestAnimationFrame(loop);
+
+
+/* -------------------------------------------------------------------------
+   勝敗の判定と、開始／やり直しの処理
+   ------------------------------------------------------------------------- */
+const startScreen  = document.getElementById("start");
+const resultScreen = document.getElementById("result");
+const resultTitle  = document.getElementById("result-title");
+const resultDetail = document.getElementById("result-detail");
+
+function checkGameEnd() {
+  if (player.hp <= 0)        finishGame(false);
+  else if (enemies.length === 0) finishGame(true);
+}
+
+function finishGame(won) {
+  running = false;
+  resultTitle.textContent  = won ? "勝利！" : "やられた…";
+  resultDetail.textContent = won
+    ? "敵を全員倒しました。撃破 " + kills + " 人 ／ 残りHP " + Math.round(player.hp)
+    : "撃破 " + kills + " 人 ／ 残っていた敵 " + enemies.length + " 人";
+  resultScreen.className = won ? "win" : "lose";   // hidden が外れて表示される
+}
+
+/* ゲームの状態を最初に戻す */
+function startGame() {
+  player.x = CONFIG.map.w / 2;
+  player.y = CONFIG.map.h / 2;
+  player.vx = player.vy = 0;
+  player.hp = CONFIG.player.maxHp;
+  player.ammo = CONFIG.weapon.magazine;
+  player.reloading = 0;
+  player.fireCooldown = 0;
+
+  bullets.length = 0;
+  particles.length = 0;
+  damageTexts.length = 0;
+  kills = 0;
+  hurtFlash = 0;
+  hitMarker = 0;
+
+  spawnEnemies();
+
+  camera.x = player.x;
+  camera.y = player.y;
+  camera.shake = 0;
+
+  // マウスの初期位置を画面中央にしておく（いきなり変な方向を向かないように）
+  input.mouse.x = viewW() / 2;
+  input.mouse.y = viewH() / 2 - 100;
+  input.firing = false;
+
+  startScreen.classList.add("hidden");
+  resultScreen.className = "hidden";
+  running = true;
+}
+
+document.getElementById("start-btn").addEventListener("click", startGame);
+document.getElementById("retry-btn").addEventListener("click", startGame);
+</script>
+</body>
+</html>

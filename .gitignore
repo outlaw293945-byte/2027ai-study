@@ -1,0 +1,8 @@
+# Local Netlify folder
+.netlify
+
+# macOSが自動生成する管理ファイル
+.DS_Store
+
+# ブラウザ自動操作(Playwright)の一時スクショ・ダウンロード
+.playwright-mcp/
