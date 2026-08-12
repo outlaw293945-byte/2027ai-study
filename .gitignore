@@ -6,3 +6,13 @@
 
 # ブラウザ自動操作(Playwright)の一時スクショ・ダウンロード
 .playwright-mcp/
+
+# 動画の元素材（容量が大きく、GitHubの1ファイル100MB制限を超えるためGit管理対象外）
+any/neiro-footage/
+*.mov
+*.MOV
+*.mp4
+*.MP4
+
+# 動画のコマ画像（枚数が多く、容量が大きいためGit管理対象外）
+dog_layer/
