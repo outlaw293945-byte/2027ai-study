@@ -16,3 +16,15 @@ any/neiro-footage/
 
 # 動画のコマ画像（枚数が多く、容量が大きいためGit管理対象外）
 dog_layer/
+
+# APIキーなどの秘密情報（Git管理対象外）
+.env
+**/.env
+
+# Python仮想環境（容量が大きいためGit管理対象外）
+.venv/
+**/.venv/
+
+# Pythonの自動生成キャッシュファイル
+__pycache__/
+**/__pycache__/

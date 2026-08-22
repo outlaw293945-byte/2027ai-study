@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "scraper": {
+      "type": "stdio",
+      "command": "/Users/takitani-kenichirou/dev/2027ai-study/202608mcp_scraper/.venv/bin/python",
+      "args": [
+        "/Users/takitani-kenichirou/dev/2027ai-study/202608mcp_scraper/scraper_mcp.py"
+      ],
+      "env": {}
+    }
+  }
+}
