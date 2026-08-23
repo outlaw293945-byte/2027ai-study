@@ -1,3 +1,4 @@
 fastmcp
-playwright
+# 1.55.0固定: 新しいバージョン(1.62.0で確認)だとBright DataのCDPプロキシに接続できず無応答でタイムアウトする
+playwright==1.55.0
 python-dotenv
