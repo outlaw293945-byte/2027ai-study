@@ -1,5 +1,6 @@
 import asyncio
 import os
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -8,6 +9,13 @@ import certifi
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from playwright.async_api import async_playwright
+
+# User-Agentを付けないと素のurllibだと判断されて403で弾くサイトがあり、
+# RobotFileParserは403を「全面禁止」と誤解釈してしまうため明示的に付与する
+ROBOTS_TXT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 # python.org版PythonはmacOSのシステム証明書ストアを使わないため、
 # certifiの証明書バンドルを明示的に指定して証明書検証エラーを防ぐ
@@ -27,7 +35,12 @@ def _allowed_by_robots_txt(url: str) -> bool:
     parser = RobotFileParser()
     parser.set_url(robots_url)
     try:
-        parser.read()
+        request = urllib.request.Request(
+            robots_url, headers={"User-Agent": ROBOTS_TXT_USER_AGENT}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            content = response.read().decode("utf-8", errors="replace")
+        parser.parse(content.splitlines())
     except Exception:
         # robots.txtが取得できない場合はブロックしない
         return True
